@@ -34,6 +34,7 @@ use Magento\InventoryApi\Api\Data\SourceItemInterfaceFactory;
 use Magento\InventoryApi\Api\SourceItemsSaveInterface;
 use Magento\Catalog\Api\CategoryLinkManagementInterface;
 use Magento\Framework\App\Area;
+use Exception;
 
 class DataPatchClass implements DataPatchInterface
 {
@@ -122,12 +123,13 @@ class DataPatchClass implements DataPatchInterface
     }
 
     /**
-     * {@inheritdoc}
+     * @return void
+     * @throws Exception
      */
-    public function apply()
+    public function apply(): void
     {
         // run setup in back-end area
-        return $this->appState->emulateAreaCode(Area::AREA_ADMINHTML, [$this, 'execute']);
+        $this->appState->emulateAreaCode(Area::AREA_ADMINHTML, [$this, 'execute']);
     }
 
     /**
@@ -181,9 +183,9 @@ class DataPatchClass implements DataPatchInterface
     }
 
     /**
-     * {@inheritdoc}
+     * @return array|string[]
      */
-    public static function getDependencies()
+    public static function getDependencies(): array
     {
         return [];
     }
