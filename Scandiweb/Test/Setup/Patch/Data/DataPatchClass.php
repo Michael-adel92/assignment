@@ -191,9 +191,9 @@ class DataPatchClass implements DataPatchInterface
     }
 
     /**
-     * {@inheritdoc}
+     * @return array|string[]
      */
-    public function getAliases()
+    public function getAliases(): array
     {
         return [];
     }
