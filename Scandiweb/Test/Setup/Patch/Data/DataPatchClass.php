@@ -1,119 +1,183 @@
-<?PHP
+<?php
+/**
+ *
+ * @category Scandiweb
+ * @package Scandiweb_Test
+ * @author Michael Adel <info@scandiweb.com>
+ * @copyright Copyright (c) 2022 Scandiweb, Inc (https://scandiweb.com)
+ * @license http://opensource.org/licenses/OSL-3.0 The Open Software License 3.0 (OSL-3.0)
+ */
+
 declare(strict_types=1);
 
 namespace Scandiweb\Test\Setup\Patch\Data;
 
+use Magento\Catalog\Api\Data\ProductInterfaceFactory;
+use Magento\Catalog\Api\ProductRepositoryInterface;
+use Magento\Catalog\Model\Product;
 use Magento\Catalog\Model\Product\Attribute\Source\Status;
 use Magento\Catalog\Model\Product\Type;
+use Magento\Catalog\Model\Product\Visibility;
+use Magento\Eav\Setup\EavSetup;
+use Magento\Framework\App\State;
 use Magento\Framework\Exception\CouldNotSaveException;
 use Magento\Framework\Exception\InputException;
 use Magento\Framework\Exception\LocalizedException;
+use Magento\Framework\Exception\NoSuchEntityException;
 use Magento\Framework\Exception\StateException;
+use Magento\Framework\Setup\ModuleDataSetupInterface;
 use Magento\Framework\Setup\Patch\DataPatchInterface;
-use Magento\Catalog\Api\Data\ProductInterfaceFactory;
-use Magento\Catalog\Api\Data\ProductInterface;
-use Magento\Catalog\Api\ProductRepositoryInterface;
-use Magento\Framework\App\State;
-use Magento\Framework\App\Area;
+use Magento\Framework\Validation\ValidationException;
+use Magento\Store\Model\StoreManagerInterface;
 use Magento\InventoryApi\Api\Data\SourceItemInterface;
+use Magento\InventoryApi\Api\Data\SourceItemInterfaceFactory;
+use Magento\InventoryApi\Api\SourceItemsSaveInterface;
 use Magento\Catalog\Api\CategoryLinkManagementInterface;
-use Magento\CatalogInventory\Api\StockRegistryInterface;
+use Magento\Framework\App\Area;
 
 class DataPatchClass implements DataPatchInterface
 {
     /**
+     * @var ModuleDataSetupInterface
+     */
+    protected ModuleDataSetupInterface $setup;
+
+    /**
      * @var ProductInterfaceFactory
      */
-    protected $productFactory;
+    protected ProductInterfaceFactory $productInterfaceFactory;
 
     /**
      * @var ProductRepositoryInterface
      */
-    protected $productRepository;
+    protected ProductRepositoryInterface $productRepository;
 
     /**
      * @var State
      */
-    protected $state;
+    protected State $appState;
 
     /**
-     * @var SourceItemInterface
+     * @var EavSetup
      */
-    protected $sourceItem;
+    protected EavSetup $eavSetup;
+
+    /**
+     * @var StoreManagerInterface
+     */
+    protected StoreManagerInterface $storeManager;
+
+    /**
+     * @var SourceItemInterfaceFactory
+     */
+    protected SourceItemInterfaceFactory $sourceItemFactory;
+
+    /**
+     * @var SourceItemsSaveInterface
+     */
+    protected SourceItemsSaveInterface $sourceItemsSaveInterface;
 
     /**
      * @var CategoryLinkManagementInterface
      */
-    protected $categoryLink;
+    protected CategoryLinkManagementInterface $categoryLink;
 
     /**
-     * @var StockRegistryInterface
+     * @var array
      */
-    protected $stockRegistry;
+    protected array $sourceItems = [];
 
     /**
-     * @param ProductInterfaceFactory $productFactory
+     *
+     * @param ModuleDataSetupInterface $setup
+     * @param ProductInterfaceFactory $productInterfaceFactory
      * @param ProductRepositoryInterface $productRepository
-     * @param State $state
-     * @param SourceItemInterface $sourceItem
+     * @param State $appState
+     * @param StoreManagerInterface $storeManager
+     * @param EavSetup $eavSetup
+     * @param SourceItemInterfaceFactory $sourceItemFactory
+     * @param SourceItemsSaveInterface $sourceItemsSaveInterface
      * @param CategoryLinkManagementInterface $categoryLink
-     * @param StockRegistryInterface $stockRegistry
      */
     public function __construct(
-        ProductInterfaceFactory $productFactory,
+        ModuleDataSetupInterface $setup,
+        ProductInterfaceFactory $productInterfaceFactory,
         ProductRepositoryInterface $productRepository,
-        State $state,
-        SourceItemInterface $sourceItem,
-        CategoryLinkManagementInterface $categoryLink,
-        StockRegistryInterface $stockRegistry
+        State $appState,
+        StoreManagerInterface $storeManager,
+        EavSetup $eavSetup,
+        SourceItemInterfaceFactory $sourceItemFactory,
+        SourceItemsSaveInterface $sourceItemsSaveInterface,
+        CategoryLinkManagementInterface $categoryLink
     ) {
-        $this->productFactory = $productFactory;
+        $this->appState = $appState;
+        $this->productInterfaceFactory = $productInterfaceFactory;
         $this->productRepository = $productRepository;
-        $this->state = $state;
-        $this->sourceItem = $sourceItem;
+        $this->setup = $setup;
+        $this->eavSetup = $eavSetup;
+        $this->storeManager = $storeManager;
+        $this->sourceItemFactory = $sourceItemFactory;
+        $this->sourceItemsSaveInterface = $sourceItemsSaveInterface;
         $this->categoryLink = $categoryLink;
-        $this->stockRegistry = $stockRegistry;
     }
 
     /**
-     * @return $this
-     * @throws CouldNotSaveException
-     * @throws InputException
-     * @throws LocalizedException
-     * @throws StateException
+     * {@inheritdoc}
      */
-    public function execute()
+    public function apply()
     {
-        /** @var ProductInterface $product */
-        $product = $this->productFactory->create();
-        $product->setSku('SAMPLE-ITEM')
-            ->setName('Sample Item')
-            ->setTypeId(Type::TYPE_SIMPLE)
-            ->setVisibility(4)
-            ->setPrice(100)
-            ->setAttributeSetId(4)
-            ->setStatus(Status::STATUS_ENABLED);
-        $this->sourceItem->setStatus(SourceItemInterface::STATUS_IN_STOCK);
-        $this->productRepository->save($product);
-
-        $stockItem = $this->stockRegistry->getStockItemBySku($product->getSku());
-        $stockItem->setIsInStock(1);
-        $stockItem->setQty(20);
-        $this->stockRegistry->updateStockItemBySku($product->getSku(), $stockItem);
-
-        $this->categoryLink->assignProductToCategories($product->getSku(), [2]);
-
-        return $this;
+        // run setup in back-end area
+        return $this->appState->emulateAreaCode(Area::AREA_ADMINHTML, [$this, 'execute']);
     }
 
     /**
      * @return void
-     * @throws \Exception
+     * @throws CouldNotSaveException
+     * @throws InputException
+     * @throws LocalizedException
+     * @throws NoSuchEntityException
+     * @throws StateException
+     * @throws ValidationException
      */
-    public function apply(): void
+    public function execute(): void
     {
-        $this->state->setAreaCode(Area::AREA_ADMINHTML);
-        $this->state->emulateAreaCode(Area::AREA_ADMINHTML, [$this, 'execute']);
+        // create the product
+        $product = $this->productInterfaceFactory->create();
+
+        // check if the product already exists
+        if ($product->getIdBySku('grip-trainer')) {
+            return;
+        }
+
+        // get the attribute set id from EavSetup object
+        $attributeSetId = $this->eavSetup->getAttributeSetId(Product::ENTITY, 'Default');
+
+        // set attributes
+        $product->setTypeId(Type::TYPE_SIMPLE)
+            ->setAttributeSetId($attributeSetId)
+            ->setName('Grip Trainer')
+            ->setSku('grip-trainer')
+            ->setUrlKey('griptrainer')
+            ->setPrice(9.99)
+            ->setVisibility(Visibility::VISIBILITY_BOTH)
+            ->setStatus(Status::STATUS_ENABLED);
+
+        // get the website id from a StoreManagerInterface instance
+        $websiteIDs = [$this->storeManager->getStore()->getWebsiteId()];
+        $product->setWebsiteIds($websiteIDs);
+        $product->setStockData(['use_config_manage_stock' => 1, 'is_qty_decimal' => 0, 'is_in_stock' => 1]);
+        $product = $this->productRepository->save($product);
+
+        // create a source item
+        $sourceItem = $this->sourceItemFactory->create();
+        $sourceItem->setSourceCode('default');
+        $sourceItem->setQuantity(100);
+        $sourceItem->setSku($product->getSku());
+        $sourceItem->setStatus(SourceItemInterface::STATUS_IN_STOCK);
+        $this->sourceItems[] = $sourceItem;
+        $this->sourceItemsSaveInterface->execute($this->sourceItems);
+
+        $this->categoryLink->assignProductToCategories($product->getSku(), [2]);
     }
 
     /**
